@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Defs>
+  <WorkGiverDef>
+    <defName>MeleePractice_BullyVictims</defName>
+    <giverClass>MeleePractice.WorkGiver_BullyVictims</giverClass>
+    <workType>BasicWorker</workType>
+    <priorityInType>100</priorityInType>
+    <directOrderable>false</directOrderable>
+    <verb>training melee</verb>
+    <gerund>training melee</gerund>
+    <requiredCapacities>
+      <li>Manipulation</li>
+    </requiredCapacities>
+  </WorkGiverDef>
+</Defs>

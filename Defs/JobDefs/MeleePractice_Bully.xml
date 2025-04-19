@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Defs>
+  <JobDef>
+    <defName>MeleePractice_Bully</defName>
+    <driverClass>MeleePractice.JobDriver_BullyPawn</driverClass>
+    <reportString>training melee on TargetA.</reportString>
+    <casualInterruptible>true</casualInterruptible>
+    <checkOverrideOnDamage>OnlyIfInstigatorNotJobTarget</checkOverrideOnDamage>
+    <playerInterruptible>true</playerInterruptible>
+  </JobDef>
+</Defs>
