@@ -7,125 +7,95 @@ namespace MeleePractice
 {
     public class JobDriver_BullyPawn : JobDriver
     {
+        /* ------------------------------------------------------------ */
         private Pawn Victim => (Pawn)job.targetA.Thing;
-        private ThingWithComps droppedWeapon;
+        private ThingWithComps droppedWeapon;             // non‑spawned copy
 
+        private bool BullyFlagOK   => pawn.GetComp<CompBullyFlags>()?.IsBully  == true;
+        private bool VictimFlagOK  => Victim.GetComp<CompBullyFlags>()?.IsVictim == true;
+
+        private bool StopBecauseLearningCapped =>
+            MeleePracticeMod.Settings.stopWhenSaturated &&
+            pawn.skills?.GetSkill(SkillDefOf.Melee)?.LearningSaturatedToday == true;
+
+        private bool StopBecausePain =>
+            Victim.health.hediffSet.PainTotal >=
+            MeleePracticeMod.Settings.PainLimitFor(Victim);
+
+        /* ------------------------------------------------------------ */
         public override bool TryMakePreToilReservations(bool errorOnFailed)
         {
-            return pawn.Reserve(Victim, job);
+            return pawn.Reserve(Victim, job, 1, -1, null, errorOnFailed);
         }
 
         protected override IEnumerable<Toil> MakeNewToils()
         {
+            /* auto‑fail conditions */
             this.FailOnDestroyedOrNull(TargetIndex.A);
-            this.FailOnAggroMentalState(TargetIndex.A);
-            this.FailOn(() =>
-            {
-                return Victim.Dead || Victim.Downed || pawn.Downed || MeleeExpCapped(pawn)
-                    || !IsVictimStillFlagged(Victim)
-                    || !IsBullyStillFlagged(pawn);
-            });
+            this.FailOn(() => pawn.Downed || !BullyFlagOK || !VictimFlagOK);
 
-            // 1. Walk to victim
+            /* 1 ▸ go to victim */
             yield return Toils_Goto.GotoThing(TargetIndex.A, PathEndMode.Touch);
 
-            // 2. Drop weapon if held
+            /* 2 ▸ drop the weapon (if any) and immediately despawn it */
             yield return new Toil
             {
                 initAction = () =>
                 {
-                    var weapon = pawn.equipment?.Primary;
-                    if (weapon != null)
+                    var eq = pawn.equipment?.Primary;
+
+                    if (eq != null)
                     {
-                        pawn.equipment.TryDropEquipment(weapon, out var dropped, pawn.Position, forbid: false);
-                        if (dropped.Spawned)
+                        if (pawn.equipment.TryDropEquipment(eq, out var dropped, pawn.Position, forbid: false))
                         {
-                            dropped.DeSpawn();
+                            droppedWeapon = dropped;
+                            droppedWeapon.DeSpawn();
+                            pawn.inventory.innerContainer.TryAdd(dropped);
                         }
-                        droppedWeapon = dropped;
-                        pawn.inventory.innerContainer.TryAdd(dropped);
-                        // Log.Message("[MeleePractice] Dropped weapon: " + dropped);
                     }
-                    else
-                    {
-                        // Log.Message("[MeleePractice] No weapon to drop.");
-                    }
+                    // else Log.Message("[MP] no weapon to drop");
                 },
                 defaultCompleteMode = ToilCompleteMode.Instant
             };
 
-            // 3. Melee attack loop
-            Toil attack = new Toil
+            /* 3 ▸ fight until a stop condition, then re‑equip and end job */
+            Toil fight = new Toil { handlingFacing = true };
+            fight.tickAction = () =>
             {
-                tickAction = () =>
+                /* stop? */
+                bool finished =
+                       Victim.Dead
+                    || Victim.Downed
+                    || StopBecausePain
+                    || StopBecauseLearningCapped
+                    || !VictimFlagOK
+                    || !BullyFlagOK;
+
+                if (finished)
                 {
-                    if (!pawn.Position.AdjacentTo8WayOrInside(Victim.Position))
+                    /* re‑equip weapon (if one exists and pawn still empty‑handed) */
+                    if (droppedWeapon != null && pawn.equipment.Primary == null)
                     {
-                        pawn.pather.StartPath(Victim, PathEndMode.Touch);
-                        return;
+                        pawn.equipment.AddEquipment(droppedWeapon);
+                        // Log.Message("[MP] weapon re‑equipped");
                     }
 
-                    if (pawn.IsHashIntervalTick(60))
-                    {
-                        if (pawn.meleeVerbs.TryMeleeAttack(Victim, null, surpriseAttack: false))
-                        {
-                            // Log.Message("[MeleePractice] Melee attack executed.");
-                        }
-                    }
-
-                    if (Victim.Dead || Victim.Downed || pawn.Downed || MeleeExpCapped(pawn)
-                        || !IsVictimStillFlagged(Victim)
-                        || !IsBullyStillFlagged(pawn))
-                    {
-                        // Log.Message("[MeleePractice] Ending attack — target condition met.");
-
-                        if (droppedWeapon != null) {
-                            foreach (Thing thing in pawn.inventory.innerContainer)
-                            {
-                                if (thing is ThingWithComps weapon && weapon == droppedWeapon)
-                                {
-                                    if (pawn.inventory.innerContainer.TryDrop(weapon, ThingPlaceMode.Direct, out Thing thingOut) && thingOut is ThingWithComps restoredWeapon)
-                                    {
-                                        if (restoredWeapon.Spawned)
-                                        {
-                                            restoredWeapon.DeSpawn();
-                                        }
-
-                                        if (restoredWeapon != null && pawn.equipment != null)
-                                        {
-                                            pawn.equipment.AddEquipment(restoredWeapon);
-                                        }
-                                    }
-
-                                    break;
-                                }
-                            }
-                        }
-
-                        EndJobWith(JobCondition.Succeeded);
-                    }
-                },
-                defaultCompleteMode = ToilCompleteMode.Never,
-                handlingFacing = true
+                    EndJobWith(JobCondition.Succeeded);
+                    return;
+                }
+                if (!pawn.Position.AdjacentTo8WayOrInside(Victim.Position))
+                {
+                    pawn.pather.StartPath(Victim, PathEndMode.Touch);
+                    return;
+                }
+                /* try a punch every 60 ticks */
+                if (pawn.IsHashIntervalTick(60))
+                {
+                    pawn.meleeVerbs.TryMeleeAttack(Victim);
+                }
             };
-            yield return attack;
-        }
-
-        private bool IsVictimStillFlagged(Pawn p)
-        {
-            return p.TryGetComp<CompBullyFlags>()?.IsVictim ?? false;
-        }
-
-        private bool IsBullyStillFlagged(Pawn p)
-        {
-            return p.TryGetComp<CompBullyFlags>()?.IsBully ?? false;
-        }
-
-        private bool MeleeExpCapped(Pawn p)
-        {
-            //var skill = p.skills?.GetSkill(SkillDefOf.Melee);
-            //return skill == null || skill.xpSinceMidnight >= 4000f;
-            return p.skills?.GetSkill(SkillDefOf.Melee)?.LearningSaturatedToday == true;
+            fight.defaultCompleteMode = ToilCompleteMode.Never;
+            yield return fight;
         }
     }
 }
