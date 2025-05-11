@@ -9,7 +9,6 @@ namespace MeleePractice
     {
         /* ------------------------------------------------------------ */
         private Pawn Victim => (Pawn)job.targetA.Thing;
-        private ThingWithComps droppedWeapon;             // non‑spawned copy
 
         private bool BullyFlagOK   => pawn.GetComp<CompBullyFlags>()?.IsBully  == true;
         private bool VictimFlagOK  => Victim.GetComp<CompBullyFlags>()?.IsVictim == true;
@@ -30,39 +29,14 @@ namespace MeleePractice
 
         protected override IEnumerable<Toil> MakeNewToils()
         {
-            /* auto‑fail conditions */
             this.FailOnDestroyedOrNull(TargetIndex.A);
             this.FailOn(() => pawn.Downed || !BullyFlagOK || !VictimFlagOK);
 
-            /* 1 ▸ go to victim */
             yield return Toils_Goto.GotoThing(TargetIndex.A, PathEndMode.Touch);
 
-            /* 2 ▸ drop the weapon (if any) and immediately despawn it */
-            yield return new Toil
-            {
-                initAction = () =>
-                {
-                    var eq = pawn.equipment?.Primary;
-
-                    if (eq != null)
-                    {
-                        if (pawn.equipment.TryDropEquipment(eq, out var dropped, pawn.Position, forbid: false))
-                        {
-                            droppedWeapon = dropped;
-                            droppedWeapon.DeSpawn();
-                            pawn.inventory.innerContainer.TryAdd(dropped);
-                        }
-                    }
-                    // else Log.Message("[MP] no weapon to drop");
-                },
-                defaultCompleteMode = ToilCompleteMode.Instant
-            };
-
-            /* 3 ▸ fight until a stop condition, then re‑equip and end job */
             Toil fight = new Toil { handlingFacing = true };
             fight.tickAction = () =>
             {
-                /* stop? */
                 bool finished =
                        Victim.Dead
                     || Victim.Downed
@@ -73,13 +47,6 @@ namespace MeleePractice
 
                 if (finished)
                 {
-                    /* re‑equip weapon (if one exists and pawn still empty‑handed) */
-                    if (droppedWeapon != null && pawn.equipment.Primary == null)
-                    {
-                        pawn.equipment.AddEquipment(droppedWeapon);
-                        // Log.Message("[MP] weapon re‑equipped");
-                    }
-
                     EndJobWith(JobCondition.Succeeded);
                     return;
                 }
@@ -88,10 +55,12 @@ namespace MeleePractice
                     pawn.pather.StartPath(Victim, PathEndMode.Touch);
                     return;
                 }
-                /* try a punch every 60 ticks */
-                if (pawn.IsHashIntervalTick(60))
+                if (pawn.IsHashIntervalTick(60) && !(pawn.stances?.FullBodyBusy ?? false))
                 {
-                    pawn.meleeVerbs.TryMeleeAttack(Victim);
+                    if (InteractionUtility.TryGetRandomVerbForSocialFight(pawn, out var fistVerb))
+                    {
+                        fistVerb.TryStartCastOn(Victim);
+                    }
                 }
             };
             fight.defaultCompleteMode = ToilCompleteMode.Never;

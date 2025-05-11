@@ -9,7 +9,7 @@ namespace MeleePractice
 
         public float painColonist  = 0.15f; // hit colonists 1-2 times
         public float painGuest     = 0.15f; // hit guests 1-2 times
-        public float painSlave     = 0.30f; // beat slaves just shy of the intense pain mood debuff
+        public float painSlave     = 0.15f; // beat slaves just shy of the intense pain mood debuff
         public float painPrisoner  = 0.60f; // Severely beat prisoners
         public float painAnimal    = 1.00f; // Down animals
 
